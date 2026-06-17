@@ -39,6 +39,7 @@ const char *version = "$VER:" VDATE;
 
 int main(int argc, char *argv[])
 {
+	setbuf(stdout, NULL);
 	// Always pin main worker process to core #1 as core #0 is the
 	// hardware interrupt handler in Linux.  This reduces idle latency
 	// in the main loop by about 6-7x.

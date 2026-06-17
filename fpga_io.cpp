@@ -26,8 +26,8 @@
 #define FPGA_REG_BASE 0xFF000000
 #define FPGA_REG_SIZE 0x01000000
 
-#define MAP_ADDR(x) (volatile uint32_t*)(&map_base[(((uint32_t)(x)) & 0xFFFFFF)>>2])
-#define IS_REG(x) (((((uint32_t)(x))-1)>=(FPGA_REG_BASE - 1)) && ((((uint32_t)(x))-1)<(FPGA_REG_BASE + FPGA_REG_SIZE - 1)))
+#define MAP_ADDR(x) (volatile uint32_t*)(&map_base[(((uintptr_t)(x)) & 0xFFFFFF)>>2])
+#define IS_REG(x) (((((uintptr_t)(x))-1)>=(FPGA_REG_BASE - 1)) && ((((uintptr_t)(x))-1)<(FPGA_REG_BASE + FPGA_REG_SIZE - 1)))
 
 #define fatal(x) munmap((void*)map_base, FPGA_REG_SIZE); close(fd); exit(x)
 
@@ -231,6 +231,7 @@ static int fpgamgr_program_init(void)
 /* Write the RBF data to FPGA Manager */
 static void fpgamgr_program_write(const void *rbf_data, size_t rbf_size)
 {
+#ifdef __arm__
 	uint32_t src = (uint32_t)rbf_data;
 	uint32_t dst = (uint32_t)MAP_ADDR(SOCFPGA_FPGAMGRDATA_ADDRESS);
 
@@ -256,6 +257,14 @@ static void fpgamgr_program_write(const void *rbf_data, size_t rbf_size)
 		"4: nop\n"
 		: "+r"(src), "+r"(dst), "+r"(loops32), "+r"(loops4) :
 		: "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "cc");
+#else
+	volatile uint32_t *dst = MAP_ADDR(SOCFPGA_FPGAMGRDATA_ADDRESS);
+	const uint32_t *src = (const uint32_t *)rbf_data;
+	size_t words = DIV_ROUND_UP(rbf_size, 4);
+	for (size_t i = 0; i < words; i++) {
+		*dst = src[i];
+	}
+#endif
 }
 
 /* Ensure the FPGA entering config done */
@@ -348,7 +357,7 @@ static int socfpga_load(const void *rbf_data, size_t rbf_size)
 {
 	unsigned long status;
 
-	if ((uint32_t)rbf_data & 0x3) {
+	if ((uintptr_t)rbf_data & 0x3) {
 		printf("FPGA: Unaligned data, realign to 32bit boundary.\n");
 		return -EINVAL;
 	}
@@ -540,6 +549,9 @@ int fpga_io_init()
 
 int fpga_core_id()
 {
+#ifndef __arm__
+	return 0xa4; // CORE_TYPE_8BIT
+#else
 	uint32_t gpo = (fpga_gpo_read() & 0x7FFFFFFF);
 	fpga_gpo_write(gpo);
 	uint32_t coretype = fpga_gpi_read();
@@ -548,6 +560,7 @@ int fpga_core_id()
 
 	if ((coretype >> 8) != 0x5CA623) return -1;
 	return coretype & 0xFF;
+#endif
 }
 
 int fpga_get_fio_size()
@@ -654,12 +667,16 @@ void fpga_core_reset(int reset)
 
 int is_fpga_ready(int quick)
 {
+#ifndef __arm__
+	return 1;
+#else
 	if (quick)
 	{
 		return (fpga_gpi_read() >= 0);
 	}
 
 	return fpgamgr_test_fpga_ready();
+#endif
 }
 
 #define SSPI_STROBE  (1<<17)
@@ -687,6 +704,9 @@ void fpga_wait_to_reset()
 
 uint16_t fpga_spi(uint16_t word)
 {
+#ifndef __arm__
+	return 0;
+#else
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE)) | word;
 
 	fpga_gpo_write(gpo);
@@ -718,6 +738,7 @@ uint16_t fpga_spi(uint16_t word)
 	} while (gpi & SSPI_ACK);
 
 	return (uint16_t)gpi;
+#endif
 }
 
 uint16_t fpga_spi_fast(uint16_t word)

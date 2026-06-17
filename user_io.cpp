@@ -129,11 +129,19 @@ uint32_t user_io_get_uart_mode()
 
 // set by OSD code to suppress forwarding of those keys to the core which
 // may be in use by an active OSD
+#ifndef __arm__
+static char osd_is_visible = 1;
+#else
 static char osd_is_visible = 0;
+#endif
 
 char user_io_osd_is_visible()
 {
+#ifndef __arm__
+	return 1;
+#else
 	return osd_is_visible;
+#endif
 }
 
 unsigned char user_io_core_type()
@@ -446,12 +454,17 @@ void user_io_read_core_name()
 	is_uneon_type = 0;
 	core_name[0] = 0;
 
+#ifndef __arm__
+	snprintf(orig_name, sizeof(orig_name), "MENU");
+	strcpy(core_name, "MENU");
+#else
 	char *p = user_io_get_confstr(0);
 	if (p && p[0]) snprintf(orig_name, sizeof(orig_name), "%s", p);
 
 	// get core name
 	if (ovr_name[0]) strcpy(core_name, ovr_name);
 	else if (orig_name[0]) strcpy(core_name, p);
+#endif
 
 	printf("Core name is \"%s\"\n", core_name);
 }
@@ -1468,7 +1481,13 @@ void user_io_init(const char *path, const char *xml)
 	uint8_t hotswap[4] = {};
 	ide_reset(hotswap);
 
+#ifndef __arm__
+	printf("DEBUG: user_io_init calling parse_config()\n");
+#endif
 	parse_config();
+#ifndef __arm__
+	printf("DEBUG: user_io_init parse_config() done\n");
+#endif
 	if (!xml && defmra[0] && FileExists(defmra))
 	{
 		// attn: FC option won't use name from defmra!
@@ -1485,10 +1504,22 @@ void user_io_init(const char *path, const char *xml)
 
 	if (cfg.bootcore[0] != '\0')
 	{
+#ifndef __arm__
+		printf("DEBUG: user_io_init calling bootcore_init()\n");
+#endif
 		bootcore_init(xml ? xml : path);
+#ifndef __arm__
+		printf("DEBUG: user_io_init bootcore_init() done\n");
+#endif
 	}
 
+#ifndef __arm__
+	printf("DEBUG: user_io_init calling video_init()\n");
+#endif
 	video_init();
+#ifndef __arm__
+	printf("DEBUG: user_io_init video_init() done\n");
+#endif
 	if (strlen(cfg.font)) LoadFont(cfg.font);
 	load_volume();
 
@@ -1729,7 +1760,13 @@ void user_io_init(const char *path, const char *xml)
 	SetMidiLinkMode(midilink);
 	SetUARTMode(uartmode);
 
+#ifndef __arm__
+	printf("DEBUG: parse_config() calling spi_uio_cmd(UIO_GET_F12_MOD)\n");
+#endif
 	f12_mod = spi_uio_cmd(UIO_GET_F12_MOD);
+#ifndef __arm__
+	printf("DEBUG: parse_config() spi_uio_cmd(UIO_GET_F12_MOD) done\n");
+#endif
 
 	if (!mgl_get()->count || is_menu() || is_st() || is_archie() || user_io_core_type() == CORE_TYPE_SHARPMZ)
 	{
@@ -4173,7 +4210,11 @@ void user_io_check_reset(unsigned short modifiers, char useKeys)
 void user_io_osd_key_enable(char on)
 {
 	//printf("OSD is now %s\n", on ? "visible" : "invisible");
+#ifndef __arm__
+	osd_is_visible = 1;
+#else
 	osd_is_visible = on;
+#endif
 	if (cfg.log_file_entry) MakeFile("/tmp/OSD_VISIBLE", on ? "1" : "0");
 	input_switch(-1);
 }

@@ -469,7 +469,11 @@ static void ini_parse(int alt, const char *vmode)
 	memset(&ini_file, 0, sizeof(ini_file));
 
 	const char *name = cfg_get_name(alt);
-	if (!FileOpen(&ini_file, name))	return;
+	if (!FileOpen(&ini_file, name))
+	{
+		if (orig_stdout) stdout = orig_stdout;
+		return;
+	}
 
 	ini_parser_debugf("Opened file %s with size %llu bytes.", name, ini_file.size);
 
@@ -510,6 +514,7 @@ static void ini_parse(int alt, const char *vmode)
 	}
 
 	FileClose(&ini_file);
+	if (orig_stdout) stdout = orig_stdout;
 }
 
 static constexpr int CFG_ERRORS_MAX = 4;

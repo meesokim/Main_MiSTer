@@ -48,6 +48,7 @@ as rotated copies of the first 128 entries.  -- AMR
 #include "profiling.h"
 
 #include "support.h"
+#include "korean.h"
 
 #define OSDLINELEN       256       // single line length in bytes
 #define OSD_CMD_WRITE    0x20      // OSD write video data command
@@ -153,6 +154,7 @@ static void rotatechar(unsigned char *in, unsigned char *out)
 
 void OsdSetTitle(const char *s, int a)
 {
+	s = translate_and_map(s);
 	// Compose the title, condensing character gaps
 	arrow = a;
 	int zeros = 0;
@@ -160,7 +162,7 @@ void OsdSetTitle(const char *s, int a)
 	uint outp = 0;
 	while (1)
 	{
-		int c = s[i++];
+		int c = (unsigned char)s[i++];
 		if (c && (outp<OSDHEIGHT-8))
 		{
 			unsigned char *p = &charfont[c][0];
@@ -246,6 +248,7 @@ static void draw_title(const unsigned char *p)
 // write a null-terminated string <s> to the OSD buffer starting at line <n>
 void OsdWriteOffset(unsigned char n, const char *s, unsigned char invert, unsigned char stipple, char offset, char leftchar, char usebg, int maxinv, int mininv)
 {
+	s = translate_and_map(s);
 	//printf("OsdWriteOffset(%d)\n", n);
 	unsigned short i;
 	unsigned char b;
@@ -284,7 +287,7 @@ void OsdWriteOffset(unsigned char n, const char *s, unsigned char invert, unsign
 			if (leftchar)
 			{
 				unsigned char tmp2[8];
-				memcpy(tmp2, charfont[(uint)leftchar], 8);
+				memcpy(tmp2, charfont[(uint)(unsigned char)leftchar], 8);
 				rotatechar(tmp2, tmp);
 				p = tmp;
 			}
@@ -424,6 +427,7 @@ void OsdDrawLogo(int row)
 
 void OSD_PrintInfo(const char *message, int *width, int *height, int frame)
 {
+	message = translate_and_map(message);
 	static char str[INFO_MAXW * INFO_MAXH];
 	memset(str, ' ', sizeof(str));
 
@@ -484,7 +488,7 @@ void OSD_PrintInfo(const char *message, int *width, int *height, int frame)
 
 		for (x = 0; x < w; x++)
 		{
-			const unsigned char *p = charfont[(uint)str[(y*INFO_MAXW) + x]];
+			const unsigned char *p = charfont[(uint)(unsigned char)str[(y*INFO_MAXW) + x]];
 			for (int i = 0; i < 8; i++) osdbuf[osdbufpos++] = *p++;
 		}
 	}
@@ -495,6 +499,7 @@ void OsdClear(void)
 {
 	osdset = -1;
 	memset(osdbuf, 0, 16 * 256);
+	reset_korean_map();
 }
 
 // enable displaying of OSD
@@ -568,34 +573,35 @@ static void print_line(unsigned char line, const char *hdr, const char *text, un
 	while (*hdr)
 	{
 		width -= 8;
-		p = charfont[(uint)(*hdr++)];
+		p = charfont[(uint)(unsigned char)(*hdr++)];
 		for (int i = 0; i < 8; i++) osdbuf[osdbufpos++] = *p++ ^ invert;
 	}
 
 	if (offset)
 	{
 		width -= 8 - offset;
-		p = &charfont[(uint)(*text++)][offset];
+		p = &charfont[(uint)(unsigned char)(*text++)][offset];
 		for (; offset < 8; offset++) osdbuf[osdbufpos++] = *p++ ^ invert;
 	}
 
 	while (width > 8)
 	{
 		unsigned char b;
-		p = &charfont[(uint)(*text++)][0];
+		p = &charfont[(uint)(unsigned char)(*text++)][0];
 		for (b = 0; b < 8; b++) osdbuf[osdbufpos++] = *p++ ^ invert;
 		width -= 8;
 	}
 
 	if (width)
 	{
-		p = &charfont[(uint)(*text++)][0];
+		p = &charfont[(uint)(unsigned char)(*text++)][0];
 		while (width--) osdbuf[osdbufpos++] = *p++ ^ invert;
 	}
 }
 
 void ScrollText(char n, const char *str, int off, int len, int max_len, unsigned char invert, int idx)
 {
+	str = translate_and_map(str);
 	// this function is called periodically when a string longer than the window is displayed.
 
 #define BLANKSPACE 10 // number of spaces between the end and start of repeated name
@@ -660,14 +666,92 @@ char* OsdCoreNameGet()
 	return lastcorename;
 }
 
+#ifndef __arm__
+static void print_utf8_char(uint32_t cp)
+{
+	if (cp < 0x80)
+	{
+		putchar(cp);
+	}
+	else if (cp < 0x800)
+	{
+		putchar(0xC0 | (cp >> 6));
+		putchar(0x80 | (cp & 0x3F));
+	}
+	else if (cp < 0x10000)
+	{
+		putchar(0xE0 | (cp >> 12));
+		putchar(0x80 | ((cp >> 6) & 0x3F));
+		putchar(0x80 | (cp & 0x3F));
+	}
+	else
+	{
+		putchar(0xF0 | (cp >> 18));
+		putchar(0x80 | ((cp >> 12) & 0x3F));
+		putchar(0x80 | ((cp >> 6) & 0x3F));
+		putchar(0x80 | (cp & 0x3F));
+	}
+}
+
+static void print_osd_terminal()
+{
+	printf("\033[H\033[J"); // Clear screen and home cursor
+	printf("┌─────────────────────────────┐\n");
+	for (int line = 0; line < osd_size; line++)
+	{
+		printf("│ ");
+		for (int c = 0; c < 29; c++)
+		{
+			const unsigned char *img = &osdbuf[line * 256 + 22 + c * 8];
+			unsigned char ch_val = ' ';
+			for (int ch = 32; ch < 256; ch++)
+			{
+				int match_normal = 1;
+				int match_invert = 1;
+				for (int i = 0; i < 8; i++)
+				{
+					if (charfont[ch][i] != img[i]) match_normal = 0;
+					if ((charfont[ch][i] ^ 0xFF) != img[i]) match_invert = 0;
+				}
+				if (match_normal || match_invert)
+				{
+					ch_val = ch;
+					break;
+				}
+			}
+			uint16_t unicode_cp = get_mapped_unicode(ch_val);
+			if (unicode_cp)
+			{
+				print_utf8_char(unicode_cp);
+			}
+			else
+			{
+				putchar(ch_val);
+			}
+		}
+		printf(" │\n");
+	}
+	printf("└─────────────────────────────┘\n");
+	fflush(stdout);
+}
+#endif
+
 void OsdUpdate()
 {
 	PROFILE_FUNCTION();
 	int n = is_menu() ? 19 : osd_size;
+	
+#ifndef __arm__
+	int do_print = 0;
+#endif
+
 	for (int i = 0; i < n; i++)
 	{
 		if (osdset & (1 << i))
 		{
+#ifndef __arm__
+			do_print = 1;
+#endif
 			spi_osd_cmd_cont(OSD_CMD_WRITE | i);
 			spi_write(osdbuf + i * 256, 256, 0);
 			DisableOsd();
@@ -679,5 +763,17 @@ void OsdUpdate()
 		}
 	}
 
+#ifndef __arm__
+	if (do_print)
+	{
+		print_osd_terminal();
+	}
+#endif
+
 	osdset = 0;
+}
+
+extern "C" uint8_t* get_osdbuf()
+{
+	return osdbuf;
 }

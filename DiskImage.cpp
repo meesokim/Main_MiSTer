@@ -2821,7 +2821,7 @@ bool unpack_td0(unsigned char *data, long &size)
 			td0_src = end_packed_data;
 		}
 	}
-	size = unsigned(td0_dst) - unsigned(data);
+	size = td0_dst - data;
 	delete[] snbuf;
 	return true;
 }

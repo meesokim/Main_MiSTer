@@ -1,6 +1,7 @@
-#ifdef __x86_64__
+#if 0
 #include <cstdint>
 #include <cstdio>
+#include <array>
 #include "cdg_unpacker.hpp"
 
 int main()

@@ -286,7 +286,7 @@ int mister_scaler_read(mister_scaler *ms, unsigned char *gbuf, mister_scaler_for
 #else
 
 // no NEON available, do all scalar
-int mister_scaler_read(mister_scaler *ms, unsigned char *gbuf, mister_scaler_format_t format = RGB)
+int mister_scaler_read(mister_scaler *ms, unsigned char *gbuf, mister_scaler_format_t format)
 {
     #ifdef PROFILING
         PROFILE_FUNCTION();
@@ -337,7 +337,7 @@ int mister_scaler_read(mister_scaler *ms, unsigned char *gbuf, mister_scaler_for
                 }
                 break;
             case ARGB32:
-            for (int x = limit; x < ms->width; x++) {
+            for (int x = 0; x < ms->width; x++) {
             #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
                 outbuf[x * 4 + 0] = pixbuf[x * 3 + 2]; // B
                 outbuf[x * 4 + 1] = pixbuf[x * 3 + 1]; // G

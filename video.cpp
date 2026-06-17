@@ -2682,8 +2682,15 @@ void video_cfg_reset()
 	setShadowMask();
 }
 
+#ifndef __arm__
+extern "C" void start_sdl_thread();
+#endif
+
 void video_init()
 {
+#ifndef __arm__
+	printf("DEBUG: video_init() start\n");
+#endif
 	yc_parse(yc_modes, sizeof(yc_modes) / sizeof(yc_modes[0]));
 
 	fb_init();
@@ -2713,6 +2720,11 @@ void video_init()
 	video_cfg_init();
 
 	video_set_mode(&v_def, 0);
+#ifndef __arm__
+	printf("DEBUG: video_init() calling start_sdl_thread()\n");
+	start_sdl_thread();
+	printf("DEBUG: video_init() end\n");
+#endif
 }
 
 void video_reinit()
@@ -4564,4 +4576,232 @@ int video_get_rotated()
 {
   return current_video_info.rotated;
 }
+
+#ifndef __arm__
+#include <SDL2/SDL.h>
+#include <thread>
+
+extern "C" void wsl_inject_key(uint16_t code, int value);
+extern "C" uint8_t* get_osdbuf();
+int OsdGetSize();
+extern unsigned char charfont[256][8];
+
+static SDL_Window *sdl_window = NULL;
+static SDL_Renderer *sdl_renderer = NULL;
+static SDL_Texture *sdl_texture = NULL;
+static std::thread *sdl_thread = NULL;
+static int sdl_running = 0;
+
+static uint16_t sdl_key_to_linux(SDL_Keycode sym)
+{
+	switch (sym)
+	{
+		case SDLK_F12:       return 88;  // KEY_F12
+		case SDLK_UP:        return 103; // KEY_UP
+		case SDLK_DOWN:      return 108; // KEY_DOWN
+		case SDLK_LEFT:      return 105; // KEY_LEFT
+		case SDLK_RIGHT:     return 106; // KEY_RIGHT
+		case SDLK_RETURN:    return 28;  // KEY_ENTER
+		case SDLK_ESCAPE:    return 1;   // KEY_ESC
+		case SDLK_SPACE:     return 57;  // KEY_SPACE
+		case SDLK_BACKSPACE: return 14;  // KEY_BACKSPACE
+		case SDLK_a:         return 30;  // KEY_A
+		case SDLK_b:         return 48;  // KEY_B
+		case SDLK_c:         return 46;  // KEY_C
+		case SDLK_d:         return 32;  // KEY_D
+		case SDLK_e:         return 18;  // KEY_E
+		case SDLK_f:         return 33;  // KEY_F
+		case SDLK_g:         return 34;  // KEY_G
+		case SDLK_h:         return 35;  // KEY_H
+		case SDLK_i:         return 23;  // KEY_I
+		case SDLK_j:         return 36;  // KEY_J
+		case SDLK_k:         return 37;  // KEY_K
+		case SDLK_l:         return 38;  // KEY_L
+		case SDLK_m:         return 50;  // KEY_M
+		case SDLK_n:         return 49;  // KEY_N
+		case SDLK_o:         return 24;  // KEY_O
+		case SDLK_p:         return 25;  // KEY_P
+		case SDLK_q:         return 16;  // KEY_Q
+		case SDLK_r:         return 19;  // KEY_R
+		case SDLK_s:         return 31;  // KEY_S
+		case SDLK_t:         return 20;  // KEY_T
+		case SDLK_u:         return 22;  // KEY_U
+		case SDLK_v:         return 47;  // KEY_V
+		case SDLK_w:         return 17;  // KEY_W
+		case SDLK_x:         return 45;  // KEY_X
+		case SDLK_y:         return 21;  // KEY_Y
+		case SDLK_z:         return 44;  // KEY_Z
+		case SDLK_0:         return 11;  // KEY_0
+		case SDLK_1:         return 2;   // KEY_1
+		case SDLK_2:         return 3;   // KEY_2
+		case SDLK_3:         return 4;   // KEY_3
+		case SDLK_4:         return 5;   // KEY_4
+		case SDLK_5:         return 6;   // KEY_5
+		case SDLK_6:         return 7;   // KEY_6
+		case SDLK_7:         return 8;   // KEY_7
+		case SDLK_8:         return 9;   // KEY_8
+		case SDLK_9:         return 10;  // KEY_9
+		default:             return 0;
+	}
+}
+
+static void sdl_render_loop()
+{
+	printf("DEBUG: sdl_render_loop() start\n");
+	if (SDL_Init(SDL_INIT_VIDEO) < 0)
+	{
+		printf("SDL_Init failed: %s\n", SDL_GetError());
+		return;
+	}
+	printf("DEBUG: SDL_Init success\n");
+
+	sdl_window = SDL_CreateWindow("MiSTer FPGA OSD (WSL)",
+		SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+		1280, 720, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+
+	if (!sdl_window)
+	{
+		printf("SDL_CreateWindow failed: %s\n", SDL_GetError());
+		SDL_Quit();
+		return;
+	}
+	printf("DEBUG: SDL_CreateWindow success\n");
+
+	sdl_renderer = SDL_CreateRenderer(sdl_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	if (!sdl_renderer)
+	{
+		printf("DEBUG: Accelerated renderer failed, trying software renderer...\n");
+		sdl_renderer = SDL_CreateRenderer(sdl_window, -1, SDL_RENDERER_SOFTWARE);
+	}
+	if (!sdl_renderer)
+	{
+		printf("SDL_CreateRenderer failed: %s\n", SDL_GetError());
+		SDL_DestroyWindow(sdl_window);
+		SDL_Quit();
+		return;
+	}
+	printf("DEBUG: SDL_CreateRenderer success\n");
+
+	sdl_running = 1;
+
+	while (sdl_running)
+	{
+		SDL_Event event;
+		while (SDL_PollEvent(&event))
+		{
+			if (event.type == SDL_QUIT)
+			{
+				sdl_running = 0;
+			}
+			else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP)
+			{
+				uint16_t linux_code = sdl_key_to_linux(event.key.keysym.sym);
+				if (linux_code != 0)
+				{
+					wsl_inject_key(linux_code, event.type == SDL_KEYDOWN ? 1 : 0);
+				}
+			}
+		}
+
+		SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
+		SDL_RenderClear(sdl_renderer);
+
+		int w = fb_width;
+		int h = fb_height;
+		if (w <= 0) w = 640;
+		if (h <= 0) h = 480;
+
+		if (!sdl_texture)
+		{
+			sdl_texture = SDL_CreateTexture(sdl_renderer,
+				SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
+		}
+
+		void *pixels;
+		int pitch;
+		if (sdl_texture && SDL_LockTexture(sdl_texture, NULL, &pixels, &pitch) == 0)
+		{
+			uint32_t *dest = (uint32_t *)pixels;
+			if (fb_base)
+			{
+				const uint32_t *src = (const uint32_t *)(fb_base + (FB_SIZE * menu_bgn));
+				for (int y = 0; y < h; y++)
+				{
+					memcpy(dest + y * (pitch / 4), src + y * w, w * 4);
+				}
+			}
+			else
+			{
+				memset(dest, 0, pitch * h);
+			}
+
+			uint8_t* osdbuf_ptr = get_osdbuf();
+			int curr_osd_size = OsdGetSize();
+			if (osdbuf_ptr && curr_osd_size > 0)
+			{
+				int scale_x = 1;
+				int scale_y = 1;
+				if (w >= 1280)
+				{
+					scale_x = 3;
+					scale_y = 4;
+				}
+				else if (w >= 640)
+				{
+					scale_x = 2;
+					scale_y = 2;
+				}
+
+				int osd_w = 256 * scale_x;
+				int osd_h = curr_osd_size * 8 * scale_y;
+				int start_x = (w - osd_w) / 2;
+				int start_y = (h - osd_h) / 2;
+
+				if (start_x >= 0 && start_y >= 0)
+				{
+					for (int y = 0; y < osd_h; y++)
+					{
+						int line = (y / scale_y) / 8;
+						int bit = (y / scale_y) % 8;
+						for (int x = 0; x < osd_w; x++)
+						{
+							uint8_t val = osdbuf_ptr[line * 256 + (x / scale_x)];
+							if ((val >> bit) & 1)
+							{
+								int tx = start_x + x;
+								int ty = start_y + y;
+								if (tx >= 0 && tx < w && ty >= 0 && ty < h)
+								{
+									dest[ty * (pitch / 4) + tx] = 0xFFFFFFFF;
+								}
+							}
+						}
+					}
+				}
+			}
+
+			SDL_UnlockTexture(sdl_texture);
+		}
+
+		if (sdl_texture)
+		{
+			SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
+		}
+
+		SDL_RenderPresent(sdl_renderer);
+		SDL_Delay(16);
+	}
+
+	if (sdl_texture) SDL_DestroyTexture(sdl_texture);
+	if (sdl_renderer) SDL_DestroyRenderer(sdl_renderer);
+	if (sdl_window) SDL_DestroyWindow(sdl_window);
+	SDL_Quit();
+}
+
+extern "C" void start_sdl_thread()
+{
+	sdl_thread = new std::thread(sdl_render_loop);
+	sdl_thread->detach();
+}
+#endif
 

@@ -3,12 +3,19 @@ SHELL = /bin/bash -o pipefail
 
 MAKEFLAGS += "-j $(shell nproc)"
 
+ifeq ($(WSL),1)
+BASE    =
+CC      = gcc
+LD      = ld
+STRIP   = strip
+else
 # using gcc version 10.2.1
 BASE    = arm-none-linux-gnueabihf
 
 CC      = $(BASE)-gcc
 LD      = $(BASE)-ld
 STRIP   = $(BASE)-strip
+endif
 
 ifeq ($(V),1)
 	Q :=
@@ -29,6 +36,12 @@ INCLUDE += -I./lib/serial_server/library
 BUILDDIR = bin
 
 PRJ = MiSTer
+ifeq ($(WSL),1)
+LIBCO_SRC = lib/libco/amd64.c
+else
+LIBCO_SRC = lib/libco/arm.c
+endif
+
 C_SRC =   $(wildcard *.c) \
           $(wildcard ./lib/miniz/*.c) \
           $(wildcard ./lib/md5/*.c) \
@@ -36,7 +49,7 @@ C_SRC =   $(wildcard *.c) \
 					$(wildcard ./lib/zstd/lib/common/*.c) \
 					$(wildcard ./lib/zstd/lib/decompress/*.c) \
           $(wildcard ./lib/libchdr/*.c) \
-          lib/libco/arm.c
+          $(LIBCO_SRC)
 
 CPP_SRC = $(wildcard *.cpp) \
           $(wildcard ./lib/serial_server/library/*.cpp) \
@@ -44,14 +57,23 @@ CPP_SRC = $(wildcard *.cpp) \
 
 IMG =     $(wildcard *.png)
 
+ifeq ($(WSL),1)
+IMLIB2_LIB  = -lfreetype -lbz2 -lpng -lz -lImlib2
+else
 IMLIB2_LIB  = -Llib/imlib2 -lfreetype -lbz2 -lpng16 -lz -lImlib2
+endif
 
 OBJ	= $(C_SRC:%.c=$(BUILDDIR)/%.c.o) $(CPP_SRC:%.cpp=$(BUILDDIR)/%.cpp.o) $(IMG:%.png=$(BUILDDIR)/%.png.o)
 DEP	= $(C_SRC:%.c=$(BUILDDIR)/%.c.d) $(CPP_SRC:%.cpp=$(BUILDDIR)/%.cpp.d)
 
-DFLAGS	= $(INCLUDE) -D_7ZIP_ST -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H -DENABLE_64_BIT_WORDS=0 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE -DVDATE=\"`date +"%y%m%d"`\"
-CFLAGS	= $(DFLAGS) -Wall -Wextra -Wno-strict-aliasing -Wno-stringop-overflow -Wno-stringop-truncation -Wno-format-truncation -Wno-psabi -Wno-restrict -c
+DFLAGS	= $(INCLUDE) -D_7ZIP_ST -DZSTD_DISABLE_ASM -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H -DENABLE_64_BIT_WORDS=0 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE -DVDATE=\"`date +"%y%m%d"`\"
+CFLAGS	= $(DFLAGS) -Wall -Wextra -Wno-strict-aliasing -Wno-stringop-overflow -Wno-stringop-truncation -Wno-format-truncation -Wno-psabi -Wno-restrict -Wno-narrowing -c
+
+ifeq ($(WSL),1)
+LFLAGS	= -lc -lstdc++ -lm -lrt $(IMLIB2_LIB) -lbluetooth -lSDL2 -lpthread
+else
 LFLAGS	= -lc -lstdc++ -lm -lrt $(IMLIB2_LIB) -Llib/bluetooth -lbluetooth -lpthread
+endif
 
 OUTPUT_FILTER = sed -e 's/\(.[a-zA-Z]\+\):\([0-9]\+\):\([0-9]\+\):/\1(\2,\ \3):/g'
 

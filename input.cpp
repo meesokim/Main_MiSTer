@@ -6926,3 +6926,13 @@ void input_advanced_save_entry(advancedButtonMap *abm_entry, int devnum)
 		return;
 	}
 }
+
+extern "C" void wsl_inject_key(uint16_t code, int value)
+{
+	struct input_event ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.type = EV_KEY;
+	ev.code = code;
+	ev.value = value;
+	input_cb(&ev, NULL, 0, true);
+}
