@@ -280,6 +280,7 @@ char is_neogeo_cd();
 char is_megacd();
 char is_pce();
 char is_archie();
+char is_msx();
 char is_gba();
 char is_c64();
 char is_c128();

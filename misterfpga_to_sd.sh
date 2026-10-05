@@ -1,0 +1,1 @@
+/home/msx/misterfpga_to_sd.sh

@@ -40,6 +40,7 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "support.h"
+#include "support/msx/zmx_service.h"
 
 static char core_path[1024] = {};
 static char rbf_path[1024] = {};
@@ -303,6 +304,13 @@ char is_archie()
 	return (is_archie_type == 1);
 }
 
+static int is_msx_type = 0;
+char is_msx()
+{
+	if (!is_msx_type) is_msx_type = strcasecmp(orig_name, "MSX") ? 2 : 1;
+	return (is_msx_type == 1);
+}
+
 static int is_pcxt_type = 0;
 char is_pcxt()
 {
@@ -439,6 +447,7 @@ void user_io_read_core_name()
 	is_megacd_type = 0;
 	is_pce_type = 0;
 	is_archie_type = 0;
+	is_msx_type = 0;
 	is_gba_type = 0;
 	is_c64_type = 0;
 	is_c128_type = 0;
@@ -3529,6 +3538,7 @@ void user_io_poll()
 	}
 
 	if (is_archie()) archie_poll();
+	if (is_msx()) zmx_service_poll();
 	if (core_type == CORE_TYPE_SHARPMZ) sharpmz_poll();
 
 	static uint8_t leds = 0;
