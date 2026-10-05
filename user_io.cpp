@@ -307,7 +307,10 @@ char is_archie()
 static int is_msx_type = 0;
 char is_msx()
 {
-	if (!is_msx_type) is_msx_type = strcasecmp(orig_name, "MSX") ? 2 : 1;
+	if (!is_msx_type) {
+		const char *cname = user_io_get_core_name();
+		is_msx_type = (!strcasecmp(orig_name, "MSX") || (cname && !strcasecmp(cname, "MSX"))) ? 1 : 2;
+	}
 	return (is_msx_type == 1);
 }
 
@@ -2138,6 +2141,21 @@ int user_io_file_mount(const char *name, unsigned char index, char pre, int pre_
 	sd_type[index] = SD_TYPE_DEFAULT ;
 	if (len)
 	{
+		if (is_msx() && len > 4 && !strcasecmp(name + len - 4, ".rom"))
+		{
+			printf("[MSX] user_io_file_mount: Loading Slot 1 ROM: %s\n", name);
+			ret = zmx_service_mount(name);
+			if (ret)
+			{
+				printf("[MSX] ROM mounted successfully, resetting core...\n");
+				user_io_status_set("[0]", 1);
+				usleep(50000);
+				user_io_status_set("[0]", 0);
+				return 1;
+			}
+			return 0;
+		}
+
 		if (!ret)
 		{
 			if (x2trd_ext_supp(name))
@@ -2720,6 +2738,23 @@ int user_io_file_tx(const char* name, unsigned char index, char opensave, char m
 	static uint8_t buf[4096];
 
 	if (!FileOpen(&f, name, mute)) return 0;
+
+	if (is_msx())
+	{
+		FileClose(&f);
+		printf("[MSX] Load ROM requested: %s\n", name);
+		int ret = zmx_service_mount(name);
+		if (ret)
+		{
+			// Always reset core after ROM mount so BIOS boots into the newly mounted cartridge
+			printf("[MSX] Resetting core after ROM mount\n");
+			user_io_status_set("[0]", 1);
+			usleep(50000);
+			user_io_status_set("[0]", 0);
+			return 1;
+		}
+		return 0;
+	}
 
 	uint32_t bytes2send = f.size;
 

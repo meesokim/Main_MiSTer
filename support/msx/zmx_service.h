@@ -10,6 +10,8 @@ extern "C" {
 void zmx_service_init(const char *rom_path);
 void zmx_service_poll();
 void zmx_service_stop();
+int zmx_service_mount(const char *filepath);
+void zmx_service_umount();
 
 #ifdef __cplusplus
 }
