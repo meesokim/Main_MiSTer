@@ -109,9 +109,14 @@ static void zmx_update_diagnostic_file(int enabled)
 
 void zmx_service_poll()
 {
-	// Check OSD status ([19:18]: ZMX Bridge, 0=Disabled, 1=Slot 1, 2=Slot 2)
-	uint32_t enabled = user_io_status_get("[19:18]");
-	zmx_update_diagnostic_file(enabled);
+	static uint32_t poll_tick = 0;
+	static uint32_t enabled = 1;
+
+	// Check status periodically every ~512 polls (~20-50ms) to avoid overhead
+	if ((++poll_tick & 0x1FF) == 0) {
+		enabled = user_io_status_get("[19:18]");
+		zmx_update_diagnostic_file(enabled);
+	}
 
 	if (!enabled) {
 		if (zmx_active) zmx_service_stop();
@@ -122,8 +127,15 @@ void zmx_service_poll()
 		zmx_service_init("/media/fat/games/MSX");
 	}
 
-	// Process up to 128 consecutive transactions in a tight burst loop
-	for (int burst = 0; burst < 128; burst++) {
+	// High-performance adaptive spin-burst loop:
+	// While MSX CPU is actively fetching instructions/data from cartridge,
+	// stay in tight polling loop without relinquishing to main loop.
+	// Max consecutive transactions per burst: 2048
+	// Max idle spin polls before relinquishing: 48 (~40-60us)
+	int tx_count = 0;
+	int idle_count = 0;
+
+	while (tx_count < 2048 && idle_count < 48) {
 		total_polls++;
 		// 1. Poll FPGA for pending transaction: returns [15:8] = 0xA5 (magic), [7:1] = cmd, bit 0 = pending
 		spi_uio_cmd_cont(CMD_ZMX_POLL);
@@ -132,7 +144,14 @@ void zmx_service_poll()
 
 		last_status = status;
 		uint8_t pending = status & 0x01;
-		if (!pending) break;
+		if (!pending) {
+			idle_count++;
+			continue;
+		}
+
+		// Reset idle count when a valid transaction is detected
+		idle_count = 0;
+		tx_count++;
 
 		uint8_t cmd = (status >> 1) & 0x7F;
 
@@ -169,13 +188,6 @@ void zmx_service_poll()
 		last_wdata = wdata;
 		last_rdata = rdata;
 
-		// Record in circular history buffer
-		history[hist_idx].cmd = cmd;
-		history[hist_idx].addr = addr;
-		history[hist_idx].wdata = wdata;
-		history[hist_idx].rdata = rdata;
-		hist_idx = (hist_idx + 1) % 8;
-
 		// Any slot memory transaction (RD_SLTSL1, RD_SLTSL2, WR_SLTSL1, WR_SLTSL2)
 		if (cmd == 0x00 || cmd == 0x10 || cmd == 0x01 || cmd == 0x11) {
 			total_slot_tx++;
@@ -183,18 +195,6 @@ void zmx_service_poll()
 			last_slot_addr = addr;
 			last_slot_wdata = wdata;
 			last_slot_rdata = rdata;
-
-			if (total_slot_tx <= 500) {
-				FILE *logfp = fopen("/tmp/zmx_slot_boot.log", "a");
-				if (logfp) {
-					fprintf(logfp, "TX#%lu: cmd=0x%02X, addr=0x%04X, wdata=0x%02X -> rdata=0x%02X\n",
-						total_slot_tx, cmd, addr, wdata, rdata);
-					fclose(logfp);
-				}
-			}
-
-			printf("[ZMX SLOT] TX#%lu: cmd=0x%02X, addr=0x%04X, wdata=0x%02X -> rdata=0x%02X (burst %d)\n",
-				total_slot_tx, cmd, addr, wdata, rdata, burst);
 		}
 	}
 }

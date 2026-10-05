@@ -70,9 +70,9 @@ DFLAGS	= $(INCLUDE) -D_7ZIP_ST -DZSTD_DISABLE_ASM -DPACKAGE_VERSION=\"1.3.3\" -D
 CFLAGS	= $(DFLAGS) -Wall -Wextra -Wno-strict-aliasing -Wno-stringop-overflow -Wno-stringop-truncation -Wno-format-truncation -Wno-psabi -Wno-restrict -Wno-narrowing -c
 
 ifeq ($(WSL),1)
-LFLAGS	= -lc -lstdc++ -lm -lrt $(IMLIB2_LIB) -lbluetooth -lSDL2 -lpthread
+LFLAGS	= -lc -lstdc++ -lm -lrt $(IMLIB2_LIB) -lbluetooth -lSDL2 -lpthread -ldl -Wl,--start-group /home/msx/RPMP2/zmx/libzmxdrive.a /home/msx/RPMP2/zmx/liblhasa_arm.a -Wl,--end-group
 else
-LFLAGS	= -lc -lstdc++ -lm -lrt $(IMLIB2_LIB) -Llib/bluetooth -lbluetooth -lpthread
+LFLAGS	= -lc -lstdc++ -lm -lrt $(IMLIB2_LIB) -Llib/bluetooth -lbluetooth -lpthread -ldl -Wl,--start-group /home/msx/RPMP2/zmx/libzmxdrive.a /home/msx/RPMP2/zmx/liblhasa_arm.a -Wl,--end-group
 endif
 
 OUTPUT_FILTER = sed -e 's/\(.[a-zA-Z]\+\):\([0-9]\+\):\([0-9]\+\):/\1(\2,\ \3):/g'

@@ -34,6 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "scheduler.h"
 #include "osd.h"
 #include "offload.h"
+#include "support/msx/zmx_service.h"
 
 const char *version = "$VER:" VDATE;
 
@@ -86,8 +87,10 @@ int main(int argc, char *argv[])
 
 		user_io_poll();
 		frame_timer();
+		if (is_msx()) zmx_service_poll();
 		input_poll(0);
 		HandleUI();
+		if (is_msx()) zmx_service_poll();
 		OsdUpdate();
 	}
 #endif
