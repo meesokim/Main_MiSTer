@@ -127,24 +127,25 @@ void zmx_service_poll()
 		zmx_service_init("/media/fat/games/MSX");
 	}
 
-	// High-performance adaptive spin-burst loop:
-	// While MSX CPU is actively fetching instructions/data from cartridge,
-	// stay in tight polling loop without relinquishing to main loop.
-	// Max consecutive transactions per burst: 2048
-	// Max idle spin polls before relinquishing: 48 (~40-60us)
+	// High-performance adaptive spin-burst loop with single-session SPI:
+	// Eliminates redundant CS toggles and cmd bytes. Reads status + addr and
+	// writes rdata back in a single contiguous SPI transaction.
+	// Max consecutive transactions per burst: 4096
+	// Max idle spin polls before relinquishing: 96 (~80-120us)
 	int tx_count = 0;
 	int idle_count = 0;
 
-	while (tx_count < 2048 && idle_count < 48) {
+	while (tx_count < 4096 && idle_count < 96) {
 		total_polls++;
-		// 1. Poll FPGA for pending transaction: returns [15:8] = 0xA5 (magic), [7:1] = cmd, bit 0 = pending
+
+		// 1. Single SPI session start: Poll FPGA for pending transaction
 		spi_uio_cmd_cont(CMD_ZMX_POLL);
 		uint16_t status = spi_w(0);
-		DisableIO();
 
 		last_status = status;
 		uint8_t pending = status & 0x01;
 		if (!pending) {
+			DisableIO();
 			idle_count++;
 			continue;
 		}
@@ -155,28 +156,30 @@ void zmx_service_poll()
 
 		uint8_t cmd = (status >> 1) & 0x7F;
 
-		// 2. Read 16-bit address and write data from FPGA
-		spi_uio_cmd_cont(CMD_ZMX_ADDR);
-		uint16_t addr       = spi_w(0);
-		uint16_t wdata_word = spi_w(0);
-		DisableIO();
+		// 2. Read 16-bit address in the SAME SPI session
+		uint16_t addr = spi_w(0);
 
-		uint8_t wdata = wdata_word & 0xFF;
-
-		// 3. Process with zmxdrive engine
+		uint8_t wdata = 0;
 		uint8_t rdata = 0xFF;
+
 		if (cmd == 0x01 || cmd == 0x11 || cmd == 0x03) {
 			// Memory Write (WR_SLTSL1, WR_SLTSL2) or IO Write (WR_IO)
+			// Read write data from FPGA
+			uint16_t wdata_word = spi_w(0);
+			wdata = wdata_word & 0xFF;
 			msxwrite(cmd, addr, wdata);
+
+			// Acknowledge completion and clear pending -> releases CPU WAIT!
+			spi_w(0);
+			DisableIO();
 		} else {
 			// Memory Read (RD_SLTSL1, RD_SLTSL2) or IO Read (RD_IO)
 			rdata = msxread(cmd, addr);
-		}
 
-		// 4. Send response to FPGA (clears pending bit and releases CPU WAIT)
-		spi_uio_cmd_cont(CMD_ZMX_RESP);
-		spi_w(rdata);
-		DisableIO();
+			// Send rdata back to FPGA immediately -> latches data & releases CPU WAIT!
+			spi_w(rdata);
+			DisableIO();
+		}
 
 		total_tx++;
 		if (cmd == 0x02 || cmd == 0x03) total_io_tx++;
